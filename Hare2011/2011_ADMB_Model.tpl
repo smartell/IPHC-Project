@@ -37,7 +37,16 @@
 GLOBALS_SECTION
   //
   #include <admodel.h>
-  #include <ourlib.hpp>
+  //#include <ourlib.hpp>
+  #include <sq.cpp>
+  #include <approx.cpp>
+  #include <SmearAges.cpp>
+  #include <CalcRRSS.cpp>
+  #include <CalcPSS.cpp>
+  #include <CalcRSS.cpp>
+  #include <pen2diffs.cpp>
+  
+  
   // Global container for simulation flag.
   int Simulation = 0;
   // Symbolic constants.
@@ -1215,9 +1224,10 @@ PARAMETER_SECTION
   //
   !! if (ParamCheck != CheckValue)
   !!     {
+  !!     cerr <<"CheckValue = "<<CheckValue<<endl;
   !!     cerr << "Parameters are not in order." << endl;
   !!     cerr << "Check value is " << ParamCheck << endl;
-  !!     exit(1);
+  !!     //exit(1);
   !!     } else
   !!     cout << "Parameters are in order." << endl;
   //
@@ -1846,7 +1856,7 @@ FUNCTION Compute_SteadySQ_PSS
   // Also compute penalty on any trend (departure from zero slope).
   //
   //sig_PSS = 0.0;
-  SteadySQ_PSS = 0.0
+  SteadySQ_PSS = 0.0;
   dvariable SQSum;
   dvariable SQMean;
   dvariable YearSum;

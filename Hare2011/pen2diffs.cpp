@@ -2,7 +2,8 @@
 // This is done by computing and penalizing second differences.
 //
 # include <fvar.hpp>
-# include <ourlib.hpp>
+//# include <sq.cpp>
+//# include <ourlib.hpp>
 //
   dvariable pen2diffs(_CONST dvar_vector& selvec, _CONST double& pensd)
 {
