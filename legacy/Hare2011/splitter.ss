@@ -29,10 +29,10 @@ SurvProp_rms_F & _M & _T 0.927443 0.968151 0.879695
 Bycatch_RSS 1
 Bycatch_RSS  & _n & _rms 332.609 208 1.26455
 BycatchWt_RSS 1
-BycatchWt_RSS  & _n & _rms 1.67397e-05 16 0.00102285
+BycatchWt_RSS  & _n & _rms 1.67396e-05 16 0.00102285
 DiscardWt_RSS  & _n & _rms 0.000429832 16 0.0051831
-SportCatchWt_RSS  & _n & _rms 9.57406e-05 16 0.00244618
-PersUseWt_RSS  & _n & _rms 9.57407e-05 16 0.00244618
+SportCatchWt_RSS  & _n & _rms 9.57404e-05 16 0.00244618
+PersUseWt_RSS  & _n & _rms 9.57406e-05 16 0.00244618
 CatchN_RSS  & _n & _rms 0.00276395 16 0.0131433
 
 PSSTotal 211.975

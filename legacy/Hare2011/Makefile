@@ -2,6 +2,7 @@
 EXEC=2011_ADMB_Model
 TPL=$(EXEC).tpl
 DAT=$(EXEC).dat
+ARG=
 
 
 all: $(EXEC) $(EXEC).rep dust
@@ -10,20 +11,20 @@ $(EXEC): $(TPL)
 	admb $(EXEC)
 
 $(EXEC).rep: $(TPL) $(DAT)
-	./$(EXEC) -ind $(DAT)
+	./$(EXEC) -ind $(DAT) $(ARG)
 
-mcmc: runmc evalmc dust
+mcmc: runmc mceval dust
 
 runmc: $(EXEC) $(EXEC).rep
-	./$(EXEC) -ind $(DAT) -mcmc 500000 -mcsave 200 -nosdmcmc
+	./$(EXEC) -ind $(DAT) $(ARG) -mcmc 500000 -mcsave 200 -nosdmcmc
 
-evalmc: $(EXEC).psv
+mceval: $(EXEC).psv
 	./$(EXEC) -ind $(DAT) -mceval
 
 
 
 dust:
-	rm -f *.log *.rpt *.htp admodel.* variance *.bar *.mcm
+	rm -f *.log *.rpt *.htp admodel.* variance *.bar *.mcm *.[bpr][0123456789]*
 
 clean:
 	rm -f $(EXEC) *.eva *.log *.rpt *.htp *.cor *.par *.r* *.p0* *.b*

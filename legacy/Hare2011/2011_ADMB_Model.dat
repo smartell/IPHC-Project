@@ -72,8 +72,8 @@
 1 0 0 0 
 # FitBycatchNosFlag 
 0 
-# RMMax 
-1000 
+# RMMax (upper bound for a parameter, orginally set at 1000)
+5000 
 # SmearAgesFlag 
 1 
 # SelSmoothFlag 
