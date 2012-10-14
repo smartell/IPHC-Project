@@ -1,0 +1,11 @@
+# Data file for hallybutte model
+# Model dimensions (nage is a plus group)
+    #   narea   ngroup  nsex 
+        1       
+        11       
+        2
+    #   syr     nyr
+        1970    2012
+    #   sage    nage
+        1       25
+
