@@ -16,6 +16,12 @@
 //         sex    h                                                          //
 //         year   i                                                          //
 //         age    j                                                          //
+//         grp    k                                                          //
+//                                                                           //
+//  Array dimensions:                                                        //
+//         collapse area group and sex into a single dimension, then create  //
+//         a linked-list to index sex area and group.                        //
+//                                                                           //
 //                                                                           //
 //  MOVEMENT MODEL BASED ON GRAVITY WEIGTHS AND RESIDENCY                    //
 //  -reference is Carruthers et al. 2011 and Caddy 1975                      //
@@ -32,17 +38,75 @@
 
 
 DATA_SECTION
+	// Counters
+	int f;		// area  
+	int g;      // group 
+	int h;      // sex   
+	int i;      // year  
+	int j;      // age   
+	int k;      // grp   
+	
 	// Model dimensions
-	init_int narea;
-	init_int ngroup;
-	init_int nsex;
-	init_int syr;
-	init_int nyr;
-	init_int sage;
-	init_int nage;
-	!! COUT(syr);
-	!! COUT(nyr);
-	!! COUT(nage);
+	init_int narea;    
+	init_int ngroup;   
+	init_int nsex;     
+	init_int syr;      
+	init_int nyr;      
+	init_int sage;     
+	init_int nage;     
+	!! ECHO(narea )
+	!! ECHO(ngroup)
+	!! ECHO(nsex  )
+	!! ECHO(syr   )
+	!! ECHO(nyr   )
+	!! ECHO(sage  )
+	!! ECHO(nage  )
+	ivector i_age(sage,nage);
+	vector  d_age(sage,nage);
+	!! i_age.fill_seqadd(sage,1);
+	!! d_age.fill_seqadd(sage,1);
+	
+	// Linked list to manage arrays
+	int N_grp;
+	!!  N_grp = narea*ngroup*nsex;
+	ivector   i_sex(1,N_grp);
+	ivector  i_area(1,N_grp);
+	ivector i_group(1,N_grp);
+	LOC_CALCS
+		k = 0;
+		for(f=1;f<=narea;f++)
+			for(g=1;g<=ngroup;g++)
+				for(h=1;h<=nsex;h++)
+				{
+					k ++;
+					i_sex(k)   = h;
+					i_area(k)  = f;
+					i_group(k) = g;
+				}	
+		COUT(i_sex);
+		COUT(i_area);
+		COUT(i_group);
+	END_CALCS
+	
+	
+	// Growth and allometry parameters
+	init_vector l_sage(1,nsex);
+	init_vector l_nage(1,nsex);
+	init_vector    vbk(1,nsex);
+	init_vector      a(1,nsex);
+	init_vector      b(1,nsex);
+	!! ECHO(l_sage)
+	!! ECHO(l_nage)
+	!! ECHO(   vbk)
+	!! ECHO(     a)
+	!! ECHO(     b)
+	
+	// Female maturity at age
+	init_number mat_age50;
+	init_number mat_std50;
+	!! ECHO(mat_age50)
+	!! ECHO(mat_std50)
+	
 
 PARAMETER_SECTION
 	init_number log_bo;
@@ -52,6 +116,9 @@ PARAMETER_SECTION
 	
 	init_vector log_m(1,nsex);
 	
+	init_bounded_dev_vector log_initR_devs(sage,nage,-15.0,15.0,2);
+	init_bounded_dev_vector log_barR_devs(syr+1,nyr,-15.0,15.0,2);
+	
 	objective_function_value f;
 	
 	number        bo;
@@ -60,7 +127,7 @@ PARAMETER_SECTION
 	vector     m(1,nsex);
 	vector    pg(1,ngroup);
 	
-	5darray    N(1,narea,1,ngroup,1,nsex,syr,nyr,sage,nage);
+	3darray    N(syr,nyr,1,N_grp,sage,nage);
 
 INITIALIZATION_SECTION
 	log_bo          7.0;
@@ -73,12 +140,13 @@ PROCEDURE_SECTION
 	
 	initParameters();
 	
+	calcGrowth();
+	
 	initPopulationModel();
 	
+	runPopulationModel();
+	
 	/* ------------------------- */
-
-	cout<<"Hello World"<<endl;
-	N.initialize();
 	exit(1);
 
 
@@ -90,20 +158,78 @@ FUNCTION initParameters
 	m         = mfexp(log_m);
 	
 	/* normal distribution for group proportions */
-	dvector x(1,ngroup);
-	x.fill_seqadd(1,1);
-	x  = 2.*(-1. + 2.*(x-1.)/(ngroup-1.));
-	pg = 1.0/sqrt(2.0*PI)*exp(-0.5*square(x));
+	if( ngroup >1 )
+	{
+		dvector x(1,ngroup);
+		x.fill_seqadd(1,1);
+		x  = 2.*(-1. + 2.*(x-1.)/(ngroup-1.));
+		pg = 1.0/sqrt(2.0*PI)*exp(-0.5*square(x));
+		pg/= sum(pg);		
+	}
+	else
+	{
+		pg = 1.0;
+	}
 	
+  }
 
-	
-	
+FUNCTION calcGrowth
+  {
+	/** Calculate length-at-age and weight-at-age */
   }
 
 FUNCTION initPopulationModel
   {
-	/** Initiaize numbers at age */
 	
+	N.initialize();
+	
+	dvariable tmpR;
+	for(k=1;k<=N_grp;k++)
+	{
+		f = i_area(k);
+		g = i_group(k);
+		h = i_sex(k);
+		
+		/** Initiaize numbers at age in syr */
+		for(j=sage;j<=nage;j++)
+		{
+			tmpR         = mfexp( log_initR + log_initR_devs(j) );
+			tmpR        /= (nsex * narea); //dispersal kernel here.
+			N(syr)(k)(j) = pg(g) * tmpR * mfexp(-m(h)*(j-sage));
+			if( j==nage )
+			{
+				N(syr)(k)(j) /= ( 1.0 - mfexp(-m(h)) );
+			}
+		}
+		
+		/** Initial recruitment in each year */
+		for(i=syr+1;i<=nyr;i++)
+		{
+			tmpR          = mfexp( log_barR + log_barR_devs(i) );
+			tmpR         /= (nsex * narea);	//dispersal kernel here.
+			N(i)(k)(sage) = pg(g) * tmpR;
+		}	
+	}
+	
+  }
+
+FUNCTION runPopulationModel
+  {
+	/** Update numbers-at-age in all N_grp and years */
+	
+	
+	for(k=1;k<=N_grp;k++)
+	{
+		f = i_area(k);
+		g = i_group(k);
+		h = i_sex(k);
+		for(i=syr+1;i<=nyr;i++)
+		{
+			N(i)(k)(sage+1,nage) =++ N(i-1)(k)(sage,nage-1)*exp(-m(h));
+			N(i)(k)(nage)       +=   N(i-1)(k)(nage)*exp(-m(h));
+		}
+	}
+	COUT(N)
   }
 
 REPORT_SECTION
@@ -128,6 +254,9 @@ GLOBALS_SECTION
 	
 	#undef COUT
 	#define COUT(object) cout << #object "\n" << object <<endl;
+	
+	#undef ECHO
+	#define ECHO(object) echoinput << "# " #object "\n" << object <<endl;
 
 	#include <admodel.h>
 	#include <time.h>
@@ -135,6 +264,8 @@ GLOBALS_SECTION
 	time_t start,finish;
 	long hour,minute,second;
 	double elapsed_time;
+	
+	ofstream echoinput("echoinput.txt");
 	
 FINAL_SECTION
 	time(&finish);

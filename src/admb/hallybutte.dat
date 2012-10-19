@@ -1,11 +1,24 @@
-# Data file for hallybutte model
-# Model dimensions (nage is a plus group)
-    #   narea   ngroup  nsex 
-        1       
-        11       
-        2
-    #   syr     nyr
-        1970    2012
-    #   sage    nage
-        1       25
-
+### Data file for hallybutte model
+### ------------------------------------------------------------------------ ###
+### Model dimensions (nage is a plus group)                                  ###
+### ------------------------------------------------------------------------ ###
+	1					## -narea
+	1					## -ngroup
+	2					## -nsex
+	1970				## -syr
+	2012				## -nyr
+	1					## -sage
+	25					## -nage
+### ----------------------------------------------------------------------- ###
+### Growth and allometry parameters by sex                                  ###
+### ----------------------------------------------------------------------- ###
+	20.0	20.0		## -mean length at sage		(l_sage)
+	150.0	135.0		## -mean length at nage  	(l_nage)
+	0.12	0.12		## -brody growth coefficient (vbk)
+	6.82e-6 6.82e-6		## -scaler in length-weight allometry 
+	3.24	3.24		## -power parameter in length-weight allometry
+### ----------------------------------------------------------------------- ###
+### Female maturity ogive (age-based)                                       ###
+### ----------------------------------------------------------------------- ###
+	10.91				## -age at 50% maturity (approx with log(3.0)/k)
+	1.406				## -std at 50% maturity (CV ~ 0.1)
