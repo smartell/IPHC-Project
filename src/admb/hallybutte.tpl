@@ -176,6 +176,9 @@ FUNCTION initParameters
 FUNCTION calcGrowth
   {
 	/** Calculate length-at-age and weight-at-age */
+	growthModel c_growth;
+	cout<<"GROWTH"<<endl;
+	cout<<c_growth.length_at_age(d_age,10,100,0.2,1,sage,20)<<endl;
   }
 
 FUNCTION initPopulationModel
@@ -229,7 +232,7 @@ FUNCTION runPopulationModel
 			N(i)(k)(nage)       +=   N(i-1)(k)(nage)*exp(-m(h));
 		}
 	}
-	COUT(N)
+	//COUT(N)
   }
 
 REPORT_SECTION
@@ -261,6 +264,7 @@ GLOBALS_SECTION
 	#include <admodel.h>
 	#include <time.h>
 	#include <statsLib.h>
+	#include <growth.cpp>
 	time_t start,finish;
 	long hour,minute,second;
 	double elapsed_time;
