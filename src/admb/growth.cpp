@@ -61,6 +61,14 @@ public:
 							const double& t1,
 							const double& t2);
 	
+	dvar_vector length_at_age(	const dvector& t, 
+							const dvariable& y1, 
+							const dvariable& y2,
+						  	const dvariable& a, 
+							const dvariable& b,
+							const dvariable& t1,
+							const dvariable& t2);
+	
 };
 
 #endif
@@ -74,9 +82,6 @@ dvector growthModel::length_at_age(	const dvector& t,
 									const double& j1,
 									const double& j2)
 {
-	//l_j = ( y1^b + (y2^b-y1^b)*(1-exp(-a*(t-t1)))/(1-exp(-a*(t2-t1))) )^(1/b)
-	// in log space
-	cout<<y2<<endl;
 	double  t1 = b*log(y1);
 	double  t3 = exp(t1);
 	double  t5 = exp(b*log(y2)) - t3;
@@ -85,3 +90,21 @@ dvector growthModel::length_at_age(	const dvector& t,
 	return ( exp(t9*log(t3 + t5 * t7)) );
 	
 }
+
+dvar_vector growthModel::length_at_age(	const dvector& t, 
+									const dvariable& y1, 
+									const dvariable& y2,
+								  	const dvariable& a, 
+									const dvariable& b,
+									const dvariable& j1,
+									const dvariable& j2)
+{
+	dvariable  t1 = b*log(y1);
+	dvariable  t3 = exp(t1);
+	dvariable  t5 = exp(b*log(y2)) - t3;
+	dvar_vector t7 = (1.0-exp(-a*(t-j1))) / (1.0-exp(-a*(j2-j1)));
+	dvariable  t9 = 1.0/b;
+	return ( exp(t9*log(t3 + t5 * t7)) );
+	
+}
+
