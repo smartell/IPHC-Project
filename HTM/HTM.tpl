@@ -9,7 +9,9 @@
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
-//  |                                                                |
+//  |  TODO:
+//  |      - Add stock recruitment function
+//  |      - Add recruitemnt residuals to objective function.
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
