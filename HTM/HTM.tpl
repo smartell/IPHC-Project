@@ -55,7 +55,7 @@ DATA_SECTION
 	init_int nyr;
 	init_int agek;
 	init_int narea;
-	
+
 	// Growth parameters
 	init_number alpha;
 	init_number rho;
@@ -100,7 +100,7 @@ INITIALIZATION_SECTION
 	log_fbar -2.302585;
 
 PARAMETER_SECTION
-	init_number log_bo(-1);
+	init_number log_bo(1);
 	init_bounded_number steepness(0.2,1.0);
 	init_bounded_number m(0.01,0.4,-2);
 	init_bounded_vector log_rbar(1,narea,-9,9,1);
@@ -114,8 +114,10 @@ PARAMETER_SECTION
 	init_bounded_number log_residency(-5,5,3);
 	init_bounded_dev_vector log_gravity_weights(1,narea,-5,5,3);
 
-	init_vector  log_q(1,narea);
-	init_vector log_qs(1,narea);
+	init_number  log_q;
+	init_bounded_dev_vector log_q_dev(1,narea,-5,5,2);
+	init_number log_qs;
+	init_bounded_dev_vector log_qs_dev(1,narea,-5,5,2);
 	
 	objective_function_value f;
 	
@@ -140,6 +142,11 @@ PARAMETER_SECTION
 	vector ell_wpue_fsh(1,narea);
 	vector ell_wbar_fsh(1,narea);
 	vector ell_wpue_srv(1,narea);
+
+	vector    St(syr,nyr);					// Spawning biomass
+	vector    Rt(syr,nyr);					// Recruitment numbers
+	vector  Rhat(syr-agek,nyr-agek);
+	vector delta(syr,nyr-agek);
 	
 	matrix     rt(syr,nyr,1,narea);
 	matrix     ft(syr,nyr,1,narea);
@@ -188,6 +195,8 @@ PROCEDURE_SECTION
 	calcFisheryCatchStatistics();
 	
 	calcSurveyStatistics();
+
+	calcStockRecruit();
 
 	calcObjectiveFunction();
 	
@@ -281,7 +290,8 @@ FUNCTION initializeModel
 	
 FUNCTION calcGravityModel
 	/*
-		| MOVEMENT MODEL BASED ON GRAVITY WEIGTHS AND RESIDENCY                
+		| MOVEMENT MODEL BASED ON GRAVITY WEIGTHS AND RESIDENCY 
+		| This is referred to as a Markov transition matrix.               
 		| -reference is Carruthers et al. 2011 and Caddy 1975                  
 		| -estimate a vector of area-specific gravity weights and a residencey 
 		|  parameter (probability of staying put in all areas).                
@@ -377,7 +387,7 @@ FUNCTION calcFisheryCatchStatistics
 	dvar_vector z(1,narea);
 	dvar_vector u(1,narea);
 	
-	q = mfexp(log_q);
+	q = mfexp(log_q+log_q_dev);
 	for(i=syr;i<=nyr;i++)
 	{
 		/*1) commercial catch by area */
@@ -437,7 +447,7 @@ FUNCTION calcSurveyStatistics
 	
 	int i,j,iyr;
 	
-	qs = mfexp(log_qs);
+	qs = mfexp(log_qs+log_qs_dev);
 	for(i=syr;i<=nyr;i++)
 	{
 		/*1) relative abundance index for survey (yt) */
@@ -460,14 +470,36 @@ FUNCTION calcSurveyStatistics
 	}
   }
 
+FUNCTION calcStockRecruit
+  {
+  	/*
+		| Calculate stock recruitment relationship based on all areas combined.
+		| R_i = sum_j rt_{i,j}
+		| S_i = sum_j bt_{i,j}
+  	*/
+  	int i,j;
+  	St = rowsum(bt.sub(syr,nyr));
+  	Rt = rowsum(rt.sub(syr,nyr));
+
+  	// Predicted recruits based on spawning biomass
+  	for(i=syr; i<=nyr; i++)
+  	{
+  		Rhat(i-agek) = so * St(i) / (1.0 + beta*St(i) );
+  	}
+  	delta(syr,nyr-agek) = log(Rt(syr,nyr-agek)) - log(Rhat(syr,nyr-agek));
+  }
+
+
 FUNCTION calcObjectiveFunction
   {
   	int i,j;
   	/*
 		Penalties to regularize the solution.
 			1) pvec(1) = average fishing mortality ~ 0.2
+			2) pvec(2) = norm2 on log_rec_devs
+
   	*/
-  	dvar_vector	pvec(1,2);
+  	dvar_vector	pvec(1,3);
   	pvec.initialize();
   	if( !last_phase() )
   	{
@@ -475,6 +507,8 @@ FUNCTION calcObjectiveFunction
   		{
   			dvariable fbar = mean(column(ft,j));
   			pvec(1) += dnorm(log(fbar),log(0.2),0.10);
+  			pvec(2) += 100. * norm2(column(log_f_devs,j));
+  			pvec(3) += 100. * norm2(column(log_rbar_devs,j));
   		}
   	}
   	else 
@@ -483,6 +517,8 @@ FUNCTION calcObjectiveFunction
   		{
   			dvariable fbar = mean(column(ft,j));
   			pvec(1) += dnorm(log(fbar),log(0.2),1.0);
+  			pvec(2) += 1.0 * norm2(column(log_f_devs,j));
+  			pvec(3) += 1.0 * norm2(column(log_rbar_devs,j));
   		}
   	}
 
@@ -491,10 +527,13 @@ FUNCTION calcObjectiveFunction
 			1) ell_catch = likelihood for the observed catch.
 			2) ell_wpue_fsh = likelihood for commercial cpue.
 			3) ell_wbar_fsh = likelihood for commercial wbar.
+			4) ell_wpue_srv = likelihood for the setline survey.
+			5) ell_rec      = likelihood for recruitment relationship.
   	*/
 	ell_catch.initialize();
 	ell_wpue_fsh.initialize();
 	ell_wpue_srv.initialize();
+	
 
 	for ( j = 1; j <= narea; j++)
 	{
@@ -513,9 +552,10 @@ FUNCTION calcObjectiveFunction
 		// Setline survey likelihood (wpue)
 		dvar_vector res4 = column(epsilon,j);
 		ell_wpue_srv(j)  = dnorm(res4,0.20);
-
 	}
 
+	dvariable ell_rec;
+	ell_rec = dnorm(delta,0.2);
 	
 	f  = fpen + rpen;
 	f += sum(pvec);
@@ -523,21 +563,40 @@ FUNCTION calcObjectiveFunction
 	f += sum(ell_wpue_fsh);
 	f += sum(ell_wbar_fsh);
 	f += sum(ell_wpue_srv);
+	f += ell_rec;
 
   }
 
 REPORT_SECTION
+	ivector iyr(syr,nyr);
+	ivector iyrs(syr,nyr+1);
+	iyr.fill_seqadd(syr,1);
+	iyrs.fill_seqadd(syr,1);
+	REPORT(iyr);
+	REPORT(iyrs);
+	REPORT(agek);
+
+	REPORT(St);
+	REPORT(Rt);
+	REPORT(Rhat);
 	REPORT(Pj);
 	REPORT(nt);
 	REPORT(bt);
 	REPORT(ct);
 	REPORT(ft);
+	REPORT(survey_wpue);
+	REPORT(qs);
+	REPORT(yt);
 	REPORT(epsilon);
 	REPORT(varphi);
 	REPORT(nu);
+	REPORT(fishery_wpue);
+	REPORT(q);
+	REPORT(it);
 	REPORT(eta);
 	REPORT(log_rbar_devs);
 	REPORT(log_f_devs);
+
 
 
 TOP_OF_MAIN_SECTION
