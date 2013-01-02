@@ -47,5 +47,18 @@ p.it 			<- ggplot(mdf,aes(x=year,y=value)) + geom_line()
 p.it 			<- p.it + geom_point(data=mdi,aes(x=year,y=value))
 p.it 			<- p.it + facet_wrap(~variable,scales="fixed")
 
+# Average Weight in the catch
+wbar 				<- data.frame(A$iyr,A$wt)
+wt  			<- data.frame(A$fishery_wbar)
+wt[wt<0] 		<- NA
+colnames(wbar) 	<- c("year",A$area)
+colnames(wt) 	<- c("year",A$area)
+mdf 			<- melt(wbar,id.var="year")
+mdi 			<- melt(wt,id.var="year",variable_name="WPUE")
+p.wt 			<- ggplot(mdf,aes(x=year,y=value)) + geom_line() 
+p.wt 			<- p.wt + geom_point(data=mdi,aes(x=year,y=value))
+p.wt 			<- p.wt + facet_wrap(~variable,scales="fixed")
+
+
 
 

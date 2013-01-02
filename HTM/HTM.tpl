@@ -60,6 +60,9 @@ DATA_SECTION
 	init_number alpha;
 	init_number rho;
 
+	// Habitat area
+	init_vector habitatArea(1,narea);
+
 	// Total removals by year and area
 	init_matrix removals(syr,nyr,0,narea);
 	matrix 		  obs_ct(syr,nyr,1,narea);
@@ -142,6 +145,7 @@ PARAMETER_SECTION
 	vector ell_wpue_fsh(1,narea);
 	vector ell_wbar_fsh(1,narea);
 	vector ell_wpue_srv(1,narea);
+	vector       ell_Pj(1,narea);
 
 	vector    St(syr,nyr);					// Spawning biomass
 	vector    Rt(syr,nyr);					// Recruitment numbers
@@ -177,7 +181,10 @@ PRELIMINARY_CALCS_SECTION
 		cout<<"|______________________________________________________|"<<endl;
 		cout<<"| Simulation: overwriting data with simulated data     |\n";
 		cout<<"|______________________________________________________|"<<endl;
-		cout<<"| Not fully implemented yet.."<<endl;
+		cout<<"| Not fully implemented yet.."<<rseed<<endl;
+
+		runSimulationModel(rseed);
+		cout<<"|"<<endl;
 		exit(1);
 	}
 
@@ -190,6 +197,8 @@ PROCEDURE_SECTION
 
 	calcGravityModel();
 	
+	initialStates();
+
 	population_dynamics();
 	
 	calcFisheryCatchStatistics();
@@ -199,6 +208,68 @@ PROCEDURE_SECTION
 	calcStockRecruit();
 
 	calcObjectiveFunction();
+
+FUNCTION void runSimulationModel(int& seed)
+  {
+	/* 
+	| -------------------------------------------------------------------- |
+	| Simulation model conditioned on the input catch data and dispersel
+	| kernel based on tagging data.  The purpose of this simulation model
+	| is to determine how estimable the model parameters are, given WPUE
+	| data only.
+	| -------------------------------------------------------------------- |
+	| Recruitment to each area is based on an average F for a given area
+	| and the model is conditioned on the historical catch.  The recruitment
+	| to each area is based on:
+	| 	1) calculate wbar for a given fbar
+	| 	2) calculate equilibrium biomass from wbar
+	|	3) calculate equilibrium recruitment from Be
+	|
+  	*/ 
+  	int i,j;
+  	random_number_generator rng(seed);
+
+  	Pj = moveProb;
+  	// Pj = identity_matrix(1,narea);
+
+  	initializeModel();
+
+  	// Calculate average recruitment to each area (log_rbar)
+  	dvector   cbar(1,narea);
+  	dvector   wbar(1,narea);
+  	dvector   rtmp(1,narea);
+  	dvector     be(1,narea);
+  	dvector     se(1,narea);
+  	dvector     re(1,narea);
+  	cbar = colsum(obs_ct)/(nyr-syr+1);
+  	be   = cbar / 0.05;
+  	se   = exp( -value(m) - 0.05 );
+  	wbar = elem_div(se*alpha + value(wk)*(1.0-se),(1.0-rho*se));
+  	re   = elem_prod(elem_div(be,wbar),1.0-se);
+
+  	// Add some random normal deviates to initial recruitment.
+ 	rtmp.fill_randn(rng);
+  	log_rbar = log(0.8*re)+0.2*rtmp;
+	
+	// Initialize state variables
+	initialStates();
+
+  	// Population dynamics
+  	dvector v_bt(1,narea);
+  	dvector v_ct(1,narea);
+  	dvar_vector sj(1,narea);
+	for(i=syr;i<=nyr;i++)
+	{
+		v_bt    = value(bt(i));
+		v_ct    = obs_ct(i);
+		ft(i)   = getFt(value(m),v_bt,v_ct);
+		sj      = mfexp( -m - ft(i) );
+		nt(i+1) = elem_prod( sj, nt(i) )*Pj + rt(i);
+		bt(i+1) = elem_prod( sj, alpha*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
+	}
+	COUT(bt(nyr));
+
+  }
 	
 FUNCTION calcFishingMortality
   {
@@ -229,7 +300,6 @@ FUNCTION calcFishingMortality
 
 	
 FUNCTION initializeModel
-	int i,j;
 	dvariable s;
 	
 	// | Initialize coast-wide unfished states
@@ -246,6 +316,9 @@ FUNCTION initializeModel
 	so   = reck*ro/bo;
 	beta = (reck-1.0)/bo;
 	
+
+FUNCTION initialStates
+	int i,j;
 	// | Initialize recruitment vectors in all years and areas
 	rbar = mfexp(log_rbar);
 	for(i=syr; i<=nyr; i++)
@@ -265,12 +338,17 @@ FUNCTION initializeModel
 	// | Initialize state variables for each regulatory area.
 	dvar_vector sj(1,narea);
 	dvar_vector wj(1,narea);
-	sj      = mfexp(-m - ft(syr));
+	sj      = mfexp(-m - ft(syr));  //FIXME should be fe
 	wj      = elem_div( sj*alpha + wk*(1.0-sj),(1.0-rho*sj) );
 	nt(syr) = elem_div( rt(syr),(1.0-sj) );
 	bt(syr) = elem_prod(nt(syr),wj);
 
-
+	// iteration for initialization to allow movement to stabilize.
+	// for(int iter = 1; iter <= 100; iter++ )
+	// {
+	// 	nt(syr) = elem_prod(nt(syr),sj)*Pj + rt(syr);
+	// 	bt(syr) = elem_prod( sj, alpha*nt(syr)+rho*bt(syr) )*Pj + wk*rt(syr);
+	// }
 
 	/*
 	|----------------------------------------------------------------------------
@@ -499,7 +577,7 @@ FUNCTION calcObjectiveFunction
 			2) pvec(2) = norm2 on log_rec_devs
 
   	*/
-  	dvar_vector	pvec(1,3);
+  	dvar_vector	pvec(1,5);
   	pvec.initialize();
   	if( !last_phase() )
   	{
@@ -510,6 +588,8 @@ FUNCTION calcObjectiveFunction
   			pvec(2) += 100. * norm2(column(log_f_devs,j));
   			pvec(3) += 100. * norm2(column(log_rbar_devs,j));
   		}
+		pvec(4) = 100. * norm2(log_q_dev);
+		pvec(5) = 100. * norm2(log_qs_dev);
   	}
   	else 
   	{
@@ -519,7 +599,9 @@ FUNCTION calcObjectiveFunction
   			pvec(1) += dnorm(log(fbar),log(0.2),1.0);
   			pvec(2) += 1.0 * norm2(column(log_f_devs,j));
   			pvec(3) += 1.0 * norm2(column(log_rbar_devs,j));
-  		}
+  		}	
+  		pvec(4) = 1000. * norm2(log_q_dev);
+		pvec(5) = 1000. * norm2(log_qs_dev);
   	}
 
   	/*
@@ -529,17 +611,19 @@ FUNCTION calcObjectiveFunction
 			3) ell_wbar_fsh = likelihood for commercial wbar.
 			4) ell_wpue_srv = likelihood for the setline survey.
 			5) ell_rec      = likelihood for recruitment relationship.
+			6) ell_Pj       = likelihood for movement matrix.
   	*/
 	ell_catch.initialize();
 	ell_wpue_fsh.initialize();
 	ell_wpue_srv.initialize();
+	ell_Pj.initialize();
 	
 
 	for ( j = 1; j <= narea; j++)
 	{
 		// Catch likelihood
 		dvar_vector res1 = column(varphi,j);
-		ell_catch(j)     = dnorm(res1,0.10);
+		ell_catch(j)     = dnorm(res1,0.02);
 
 		// Commercial wpue likelihood
 		dvar_vector res2 = column(eta,j);
@@ -552,6 +636,9 @@ FUNCTION calcObjectiveFunction
 		// Setline survey likelihood (wpue)
 		dvar_vector res4 = column(epsilon,j);
 		ell_wpue_srv(j)  = dnorm(res4,0.20);
+
+		// Movement probability
+		ell_Pj(j) = 100.* norm2(moveProb(j)-Pj(j));
 	}
 
 	dvariable ell_rec;
@@ -563,6 +650,7 @@ FUNCTION calcObjectiveFunction
 	f += sum(ell_wpue_fsh);
 	f += sum(ell_wbar_fsh);
 	f += sum(ell_wpue_srv);
+	f += sum(ell_Pj);
 	f += ell_rec;
 
   }
@@ -589,6 +677,8 @@ REPORT_SECTION
 	REPORT(yt);
 	REPORT(epsilon);
 	REPORT(varphi);
+	REPORT(fishery_wbar);
+	REPORT(wt);
 	REPORT(nu);
 	REPORT(fishery_wpue);
 	REPORT(q);
@@ -617,7 +707,7 @@ GLOBALS_SECTION
 	#define REPORT(object) report << #object "\n" << object << endl;
 	
 	#undef COUT
-	#define COUT(object) cout<<fixed<<#object "\n"<<object<<endl;
+	#define COUT(object) cout<<setprecision(3)<<fixed<<#object "\n"<<object<<endl;
 	
 	#undef TINY
 	#define TINY 1.e-20
@@ -629,6 +719,7 @@ GLOBALS_SECTION
 	#include <admodel.h>
 	#include <time.h>
 	#include <statsLib.h>
+	#include <Baranov.cpp>
 	time_t start,finish;
 	long hour,minute,second;
 	double elapsed_time;
