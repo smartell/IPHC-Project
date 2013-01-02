@@ -10,8 +10,9 @@
 //  |                                                                |
 //  |                                                                |
 //  |  TODO:
-//  |      - Add stock recruitment function
-//  |      - Add recruitemnt residuals to objective function.
+//  |      - Add stock recruitment function  DONE
+//  |      - Add recruitemnt residuals to objective function. DONE
+//  |      - Random walk in growth.
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
@@ -57,7 +58,7 @@ DATA_SECTION
 	init_int narea;
 
 	// Growth parameters
-	init_number alpha;
+	init_number d_alpha;
 	init_number rho;
 
 	// Habitat area
@@ -117,10 +118,15 @@ PARAMETER_SECTION
 	init_bounded_number log_residency(-5,5,3);
 	init_bounded_dev_vector log_gravity_weights(1,narea,-5,5,3);
 
+	// catchability parameters for commercial fishery and survey
 	init_number  log_q;
 	init_bounded_dev_vector log_q_dev(1,narea,-5,5,2);
 	init_number log_qs;
 	init_bounded_dev_vector log_qs_dev(1,narea,-5,5,2);
+
+	// random walk parameters for growth intercept.
+	init_number log_alpha(1);
+	init_bounded_vector log_alpha_dev(syr,nyr-1,-5,5,-2);
 	
 	objective_function_value f;
 	
@@ -149,8 +155,9 @@ PARAMETER_SECTION
 
 	vector    St(syr,nyr);					// Spawning biomass
 	vector    Rt(syr,nyr);					// Recruitment numbers
-	vector  Rhat(syr-agek,nyr-agek);
-	vector delta(syr,nyr-agek);
+	vector alpha(syr,nyr);					// Growth intercept vector.
+	vector  Rhat(syr+agek,nyr+agek);
+	vector delta(syr+agek,nyr);
 	
 	matrix     rt(syr,nyr,1,narea);
 	matrix     ft(syr,nyr,1,narea);
@@ -192,6 +199,8 @@ PRELIMINARY_CALCS_SECTION
 PROCEDURE_SECTION
 
 	calcFishingMortality();
+
+	growthModel();
 	
 	initializeModel();
 
@@ -244,7 +253,7 @@ FUNCTION void runSimulationModel(int& seed)
   	cbar = colsum(obs_ct)/(nyr-syr+1);
   	be   = cbar / 0.05;
   	se   = exp( -value(m) - 0.05 );
-  	wbar = elem_div(se*alpha + value(wk)*(1.0-se),(1.0-rho*se));
+  	wbar = elem_div(se*value(alpha(syr)) + value(wk)*(1.0-se),(1.0-rho*se));
   	re   = elem_prod(elem_div(be,wbar),1.0-se);
 
   	// Add some random normal deviates to initial recruitment.
@@ -265,7 +274,7 @@ FUNCTION void runSimulationModel(int& seed)
 		ft(i)   = getFt(value(m),v_bt,v_ct);
 		sj      = mfexp( -m - ft(i) );
 		nt(i+1) = elem_prod( sj, nt(i) )*Pj + rt(i);
-		bt(i+1) = elem_prod( sj, alpha*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
+		bt(i+1) = elem_prod( sj, value(alpha(i))*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
 	}
 	COUT(bt(nyr));
 
@@ -298,7 +307,28 @@ FUNCTION calcFishingMortality
 	}
   }
 
-	
+FUNCTION growthModel
+	/*
+	| ----------------------------------------------------------------------- |
+	| Calculate vector of alpha values based on a random walk                 |
+	| ----------------------------------------------------------------------- |
+	|
+	*/
+	int i;
+	alpha = d_alpha;
+	if( active(log_alpha) )
+	{
+		alpha = mfexp(log_alpha);
+	}
+
+	if( active(log_alpha_dev) )
+	{
+		for( i = syr; i < nyr; i++ )
+		{
+			alpha(i+1) = alpha(i)*exp(log_alpha_dev(i));
+		}
+	}
+		
 FUNCTION initializeModel
 	dvariable s;
 	
@@ -306,8 +336,8 @@ FUNCTION initializeModel
 	s    = mfexp(-m);
 	bo   = mfexp(log_bo);
 	reck = 4.0* steepness / (1.0 - steepness);
-	wk   = alpha*( 1.0 - pow(rho,agek) )/(1.0-rho);
-	wbar = (s*alpha + wk*(1.0-s))/(1.0-rho*s);
+	wk   = alpha(syr)*( 1.0 - pow(rho,agek) )/(1.0-rho);
+	wbar = (s*alpha(syr) + wk*(1.0-s))/(1.0-rho*s);
 	no   = bo/wbar;
 	ro   = no*(1.0-s);
 	
@@ -339,7 +369,7 @@ FUNCTION initialStates
 	dvar_vector sj(1,narea);
 	dvar_vector wj(1,narea);
 	sj      = mfexp(-m - ft(syr));  //FIXME should be fe
-	wj      = elem_div( sj*alpha + wk*(1.0-sj),(1.0-rho*sj) );
+	wj      = elem_div( sj*alpha(syr) + wk*(1.0-sj),(1.0-rho*sj) );
 	nt(syr) = elem_div( rt(syr),(1.0-sj) );
 	bt(syr) = elem_prod(nt(syr),wj);
 
@@ -368,15 +398,17 @@ FUNCTION initialStates
 	
 FUNCTION calcGravityModel
 	/*
-		| MOVEMENT MODEL BASED ON GRAVITY WEIGTHS AND RESIDENCY 
-		| This is referred to as a Markov transition matrix.               
-		| -reference is Carruthers et al. 2011 and Caddy 1975                  
-		| -estimate a vector of area-specific gravity weights and a residencey 
-		|  parameter (probability of staying put in all areas).                
-		| - set M_{f,f'} = r+g_{f}  if f = f'                                  
-		|   set M_{f,f'} = g_{f}    if f!= f'                                  
-		|       M_{f,f'} = M_{f,f'}/sum_{f'} M_{f,f'}                          
-		| - M_{f,f'} is the probability of movement from f to f'   
+	|--------------------------------------------------------------------------|
+	| MOVEMENT MODEL BASED ON GRAVITY WEIGTHS AND RESIDENCY 
+	| This is referred to as a Markov transition matrix.               
+	| -reference is Carruthers et al. 2011 and Caddy 1975                  
+	| -estimate a vector of area-specific gravity weights and a residencey 
+	|  parameter (probability of staying put in all areas).                
+	| - set M_{f,f'} = r+g_{f}  if f = f'                                  
+	|   set M_{f,f'} = g_{f}    if f!= f'                                  
+	|       M_{f,f'} = M_{f,f'}/sum_{f'} M_{f,f'}                          
+	| - M_{f,f'} is the probability of movement from f to f'
+	|--------------------------------------------------------------------------|   
 	*/
 	int j;
 	Pj.initialize();
@@ -406,7 +438,7 @@ FUNCTION calcGravityModel
 	{
 		G(j)=G(j)/colsumG(j);
 	}
-	Pj = trans(G);
+	Pj = (G);
 
 FUNCTION void initializeDispersalKernel(dvector& d, const dmatrix& M)
   {
@@ -448,7 +480,7 @@ FUNCTION  population_dynamics
 	{
 		sj      = mfexp( -m - ft(i) );
 		nt(i+1) = elem_prod( sj, nt(i) )*Pj + rt(i);
-		bt(i+1) = elem_prod( sj, alpha*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
+		bt(i+1) = elem_prod( sj, alpha(i)*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
 	}
   }
 	
@@ -551,9 +583,12 @@ FUNCTION calcSurveyStatistics
 FUNCTION calcStockRecruit
   {
   	/*
-		| Calculate stock recruitment relationship based on all areas combined.
-		| R_i = sum_j rt_{i,j}
-		| S_i = sum_j bt_{i,j}
+  	|--------------------------------------------------------------------------|
+	| Calculate stock recruitment relationship based on all areas combined.    |
+	|--------------------------------------------------------------------------|
+	| R_i = sum_j rt_{i,j}
+	| S_i = sum_j bt_{i,j}
+	|
   	*/
   	int i,j;
   	St = rowsum(bt.sub(syr,nyr));
@@ -562,9 +597,9 @@ FUNCTION calcStockRecruit
   	// Predicted recruits based on spawning biomass
   	for(i=syr; i<=nyr; i++)
   	{
-  		Rhat(i-agek) = so * St(i) / (1.0 + beta*St(i) );
+  		Rhat(i+agek) = so * St(i) / (1.0 + beta*St(i) );
   	}
-  	delta(syr,nyr-agek) = log(Rt(syr,nyr-agek)) - log(Rhat(syr,nyr-agek));
+  	delta(syr+agek,nyr) = log(Rt(syr+agek,nyr)) - log(Rhat(syr+agek,nyr));
   }
 
 
@@ -577,7 +612,7 @@ FUNCTION calcObjectiveFunction
 			2) pvec(2) = norm2 on log_rec_devs
 
   	*/
-  	dvar_vector	pvec(1,5);
+  	dvar_vector	pvec(1,6);
   	pvec.initialize();
   	if( !last_phase() )
   	{
@@ -590,6 +625,7 @@ FUNCTION calcObjectiveFunction
   		}
 		pvec(4) = 100. * norm2(log_q_dev);
 		pvec(5) = 100. * norm2(log_qs_dev);
+		pvec(6) = 100. * norm2(log_alpha_dev);
   	}
   	else 
   	{
@@ -600,18 +636,29 @@ FUNCTION calcObjectiveFunction
   			pvec(2) += 1.0 * norm2(column(log_f_devs,j));
   			pvec(3) += 1.0 * norm2(column(log_rbar_devs,j));
   		}	
-  		pvec(4) = 1000. * norm2(log_q_dev);
-		pvec(5) = 1000. * norm2(log_qs_dev);
+  		pvec(4) = 10.0  * norm2(log_q_dev);
+		pvec(5) = 10.0  * norm2(log_qs_dev);
+		pvec(6) = 10.0  * norm2(log_alpha_dev);
   	}
 
   	/*
-		Negative loglikelihoods:
-			1) ell_catch = likelihood for the observed catch.
-			2) ell_wpue_fsh = likelihood for commercial cpue.
-			3) ell_wbar_fsh = likelihood for commercial wbar.
-			4) ell_wpue_srv = likelihood for the setline survey.
-			5) ell_rec      = likelihood for recruitment relationship.
-			6) ell_Pj       = likelihood for movement matrix.
+	| Priors
+	| 1) prior for steepness
+  	*/
+  	dvar_vector prior(1,1);
+  	prior.initialize();
+
+  	prior(1) = dbeta((steepness-0.2)/0.8,1.01,1.01);
+
+
+  	/*
+	| Negative loglikelihoods:
+	| 	1) ell_catch = likelihood for the observed catch.
+	| 	2) ell_wpue_fsh = likelihood for commercial cpue.
+	| 	3) ell_wbar_fsh = likelihood for commercial wbar.
+	| 	4) ell_wpue_srv = likelihood for the setline survey.
+	| 	5) ell_rec      = likelihood for recruitment relationship.
+	| 	6) ell_Pj       = likelihood for movement matrix.
   	*/
 	ell_catch.initialize();
 	ell_wpue_fsh.initialize();
@@ -646,6 +693,7 @@ FUNCTION calcObjectiveFunction
 	
 	f  = fpen + rpen;
 	f += sum(pvec);
+	f += sum(prior);
 	f += sum(ell_catch);
 	f += sum(ell_wpue_fsh);
 	f += sum(ell_wbar_fsh);
@@ -663,19 +711,20 @@ REPORT_SECTION
 	REPORT(iyr);
 	REPORT(iyrs);
 	REPORT(agek);
-
+	REPORT(alpha);
 	REPORT(St);
 	REPORT(Rt);
 	REPORT(Rhat);
 	REPORT(Pj);
 	REPORT(nt);
 	REPORT(bt);
-	REPORT(ct);
 	REPORT(ft);
 	REPORT(survey_wpue);
 	REPORT(qs);
 	REPORT(yt);
 	REPORT(epsilon);
+	REPORT(obs_ct);
+	REPORT(ct);
 	REPORT(varphi);
 	REPORT(fishery_wbar);
 	REPORT(wt);
