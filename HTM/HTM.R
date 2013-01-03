@@ -75,5 +75,15 @@ p.wt 			<- p.wt + geom_point(data=mdi,aes(x=year,y=value))
 p.wt 			<- p.wt + facet_wrap(~variable,scales="fixed")
 p.wt 			<- p.wt + labs(x="Year",y="Catch average weight (lbs)")
 
+# Stock recruitment plot
+ii   <- 1:(length(A$St)-A$agek)
+S    <- A$St[ii]
+R    <- A$Rt[ii+A$agek]
+ss   <- seq(0,max(S),length=100)
+rr   <- A$so*ss/(1+A$beta*ss)
+p.sr <- qplot(S,R)+ylim(c(0,max(R)))+xlim(c(0,max(S)))
+p.sr <- p.sr+geom_line(aes(x=ss,y=rr))
+p.sr <- p.sr+labs(x="Spawning biomass")
+p.sr <- p.sr+labs(y=paste("Recruitment (age ",A$agek,")",sep=""))
 
 

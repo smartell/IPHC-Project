@@ -13,6 +13,7 @@
 //  |      - Add stock recruitment function  DONE
 //  |      - Add recruitemnt residuals to objective function. DONE
 //  |      - Random walk in growth.
+//  |      - Simulation model.
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
@@ -63,6 +64,7 @@ DATA_SECTION
 
 	// Habitat area
 	init_vector habitatArea(1,narea);
+	!! habitatArea = habitatArea / 1.e5;
 
 	// Total removals by year and area
 	init_matrix removals(syr,nyr,0,narea);
@@ -126,7 +128,7 @@ PARAMETER_SECTION
 
 	// random walk parameters for growth intercept.
 	init_number log_alpha(1);
-	init_bounded_vector log_alpha_dev(syr,nyr-1,-5,5,-2);
+	init_bounded_vector log_alpha_dev(syr,nyr-1,-5,5,4);
 	
 	objective_function_value f;
 	
@@ -192,7 +194,7 @@ PRELIMINARY_CALCS_SECTION
 
 		runSimulationModel(rseed);
 		cout<<"|"<<endl;
-		exit(1);
+		
 	}
 
 
@@ -235,30 +237,59 @@ FUNCTION void runSimulationModel(int& seed)
 	|	3) calculate equilibrium recruitment from Be
 	|
   	*/ 
-  	int i,j;
+  	int i,j,iyr;
+  	
+  	// average F to scale log_rbar
+  	dvector fbar   = ("{0.05,0.15,0.07,0.15,0.07,0.03,0.05,0.05}");	
+
+  	// std for log_rbar_devs
+  	double sigma_R  = 0.0;
+
+  	// std for fishery wpue and wbar
+  	double sigma_it = 0.0;
+  	double sigma_wt = 0.0;
+
+  	// std for survey wpue
+  	double sigma_yt = 0.0;
+
   	random_number_generator rng(seed);
 
   	Pj = moveProb;
   	// Pj = identity_matrix(1,narea);
-
+  	growthModel();
   	initializeModel();
 
   	// Calculate average recruitment to each area (log_rbar)
   	dvector   cbar(1,narea);
   	dvector   wbar(1,narea);
-  	dvector   rtmp(1,narea);
   	dvector     be(1,narea);
   	dvector     se(1,narea);
   	dvector     re(1,narea);
   	cbar = colsum(obs_ct)/(nyr-syr+1);
-  	be   = cbar / 0.05;
-  	se   = exp( -value(m) - 0.05 );
+  	be   = elem_div(cbar , fbar);
+  	se   = exp( -value(m) - fbar );
   	wbar = elem_div(se*value(alpha(syr)) + value(wk)*(1.0-se),(1.0-rho*se));
   	re   = elem_prod(elem_div(be,wbar),1.0-se);
 
   	// Add some random normal deviates to initial recruitment.
+  	dvector   rtmp(1,narea);
  	rtmp.fill_randn(rng);
-  	log_rbar = log(0.8*re)+0.2*rtmp;
+  	log_rbar = log(0.8*re)+sigma_R*rtmp;
+
+  	// Random normal deviates to log_rbar_devs
+  	// Ensure each column has a mean 0. Note that trans is not overloaded for
+  	// init_bounded_matrix object. PAIN in the A**S
+  	dmatrix r_devs(1,narea,syr,nyr);
+  	r_devs.fill_randn(rng);
+  	for( j = 1; j <= narea; j++ )
+  	{
+  		r_devs(j) -= mean(r_devs(j));
+  		for( i = syr; i <= nyr; i++ )
+  		{
+  			log_rbar_devs(i,j) = sigma_R * r_devs(j,i);
+  		}
+  	}
+  	
 	
 	// Initialize state variables
 	initialStates();
@@ -276,8 +307,66 @@ FUNCTION void runSimulationModel(int& seed)
 		nt(i+1) = elem_prod( sj, nt(i) )*Pj + rt(i);
 		bt(i+1) = elem_prod( sj, value(alpha(i))*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
 	}
-	COUT(bt(nyr));
+	// COUT(bt(nyr));
 
+	// Calculate fisheries catch statisitics and fill observations
+	// with iid errors (it, and wt).
+	calcFisheryCatchStatistics();
+	dmatrix it_devs(1,n_fish_obs,1,narea);
+	dmatrix wt_devs(1,n_wbar_obs,1,narea);
+	it_devs.fill_randn(rng);
+	wt_devs.fill_randn(rng);
+
+	it_devs = sigma_it * it_devs;
+	wt_devs = sigma_wt * wt_devs;
+
+	// Overwrite WPUE data
+	for( i = 1; i <= n_fish_obs; i++ )
+	{
+		iyr = fishery_wpue(i,0);
+		for( j = 1; j <= narea; j++ )
+		{
+			double tmp = fishery_wpue(i,j);
+			if( tmp > 0 )
+			{
+				fishery_wpue(i,j) = value(it(iyr,j))*exp(it_devs(i,j));
+			}
+		}
+	}
+	
+	// Overwrite wbar data
+	for( i = 1; i <= n_wbar_obs; i++ )
+	{
+		iyr = fishery_wbar(i,0);
+		for( j = 1; j <= narea; j++ )
+		{
+			double tmp = fishery_wbar(i,j);
+			if( tmp > 0 )
+			{
+				fishery_wbar(i,j) = value(wt(iyr,j))*exp(wt_devs(i,j));
+			}
+		}
+	}
+
+	// Calculate survey WPUE index
+	calcSurveyStatistics();
+	dmatrix yt_devs(1,n_surv_obs,1,narea);
+	yt_devs.fill_randn(rng);
+	yt_devs = sigma_yt * yt_devs;
+
+	// Overwrite survey_wpue data
+	for( i = 1; i <= n_surv_obs; i++ )
+	{
+		iyr = survey_wpue(i,0);
+		for( j = 1; j <= narea; j++ )
+		{
+			double tmp = survey_wpue(i,j);
+			if( tmp > 0 )
+			{
+				survey_wpue(i,j) = value(yt(iyr,j)) * exp(yt_devs(i,j));
+			}
+		}
+	}
   }
 	
 FUNCTION calcFishingMortality
@@ -374,10 +463,10 @@ FUNCTION initialStates
 	bt(syr) = elem_prod(nt(syr),wj);
 
 	// iteration for initialization to allow movement to stabilize.
-	// for(int iter = 1; iter <= 100; iter++ )
+	// for(int iter = 1; iter <= 50; iter++ )
 	// {
 	// 	nt(syr) = elem_prod(nt(syr),sj)*Pj + rt(syr);
-	// 	bt(syr) = elem_prod( sj, alpha*nt(syr)+rho*bt(syr) )*Pj + wk*rt(syr);
+	// 	bt(syr) = elem_prod( sj, alpha(syr)*nt(syr)+rho*bt(syr) )*Pj + wk*rt(syr);
 	// }
 
 	/*
@@ -487,17 +576,19 @@ FUNCTION  population_dynamics
 FUNCTION calcFisheryCatchStatistics
   {
 	/*
-		| Compute the predicted fishery catch statistics:
-		| 1) commercial catch by area          (ct)
-		| 2) commercial wpue by area           (it)
-		| 3) mean weight of the catch by area  (wt)
+	|-------------------------------------------------------------------------|
+	| Compute the predicted fishery catch statistics:                         |
+	|-------------------------------------------------------------------------|
+	| 1) commercial catch by area          (ct)
+	| 2) commercial wpue by area           (it)
+	| 3) mean weight of the catch by area  (wt)
 	*/
 	
 	int i,j,iyr;
 	dvar_vector z(1,narea);
 	dvar_vector u(1,narea);
 	
-	q = mfexp(log_q+log_q_dev);
+	q = mfexp( log_q + log_q_dev - log(habitatArea) );
 	for(i=syr;i<=nyr;i++)
 	{
 		/*1) commercial catch by area */
@@ -514,7 +605,8 @@ FUNCTION calcFisheryCatchStatistics
 		/*3) mean weight of the catch
 			wt = (catch weight)/(catch numbers)
 		*/
-		wt(i) = elem_div( ct(i),elem_prod(u,nt(i)) );
+		// wt(i) = elem_div( ct(i),elem_prod(u,nt(i)) );
+		wt(i) = elem_div(bt(i),nt(i));
 	}
 
 	// Residuals for commercial wpue.
@@ -557,7 +649,7 @@ FUNCTION calcSurveyStatistics
 	
 	int i,j,iyr;
 	
-	qs = mfexp(log_qs+log_qs_dev);
+	qs = mfexp( log_qs + log_qs_dev - log(habitatArea) );
 	for(i=syr;i<=nyr;i++)
 	{
 		/*1) relative abundance index for survey (yt) */
@@ -625,7 +717,10 @@ FUNCTION calcObjectiveFunction
   		}
 		pvec(4) = 100. * norm2(log_q_dev);
 		pvec(5) = 100. * norm2(log_qs_dev);
-		pvec(6) = 100. * norm2(log_alpha_dev);
+		if( active(log_alpha_dev) )
+		{
+			pvec(6) = 100. * norm2(log_alpha_dev);
+		}
   	}
   	else 
   	{
@@ -638,7 +733,10 @@ FUNCTION calcObjectiveFunction
   		}	
   		pvec(4) = 10.0  * norm2(log_q_dev);
 		pvec(5) = 10.0  * norm2(log_qs_dev);
-		pvec(6) = 10.0  * norm2(log_alpha_dev);
+		if( active(log_alpha_dev) )
+		{
+			pvec(6) = 100.  * norm2(log_alpha_dev);
+		}
   	}
 
   	/*
@@ -670,7 +768,7 @@ FUNCTION calcObjectiveFunction
 	{
 		// Catch likelihood
 		dvar_vector res1 = column(varphi,j);
-		ell_catch(j)     = dnorm(res1,0.02);
+		ell_catch(j)     = dnorm(res1,0.05);
 
 		// Commercial wpue likelihood
 		dvar_vector res2 = column(eta,j);
@@ -678,7 +776,7 @@ FUNCTION calcObjectiveFunction
 
 		// Commercial wbar likelihood
 		dvar_vector res3 = column(nu,j);
-		ell_wbar_fsh(j)  = dnorm(res3,0.40);
+		ell_wbar_fsh(j)  = dnorm(res3,0.30);
 
 		// Setline survey likelihood (wpue)
 		dvar_vector res4 = column(epsilon,j);
@@ -712,6 +810,8 @@ REPORT_SECTION
 	REPORT(iyrs);
 	REPORT(agek);
 	REPORT(alpha);
+	REPORT(so);
+	REPORT(beta);
 	REPORT(St);
 	REPORT(Rt);
 	REPORT(Rhat);
@@ -752,13 +852,13 @@ GLOBALS_SECTION
 	\def REPORT(object)
 	Prints name and value of \a object on ADMB report %ofstream file.
 	*/
-	#undef REPORT
+	#undef  REPORT
 	#define REPORT(object) report << #object "\n" << object << endl;
 	
-	#undef COUT
+	#undef  COUT
 	#define COUT(object) cout<<setprecision(3)<<fixed<<#object "\n"<<object<<endl;
 	
-	#undef TINY
+	#undef  TINY
 	#define TINY 1.e-20
 
 	#include <iostream>
