@@ -9,11 +9,11 @@
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
-//  |  TODO:
-//  |      - Add stock recruitment function  DONE
+//  |  TODO: 
+//  |      - Add stock recruitment function  DONE 
 //  |      - Add recruitemnt residuals to objective function. DONE
-//  |      - Random walk in growth.
-//  |      - Simulation model.
+//  |      - Random walk in growth. DONE
+//  |      - Simulation model, based on S_R relationship.
 //  |                                                                |
 //  |                                                                |
 //  |                                                                |
@@ -229,18 +229,24 @@ FUNCTION void runSimulationModel(int& seed)
 	| is to determine how estimable the model parameters are, given WPUE
 	| data only.
 	| -------------------------------------------------------------------- |
-	| Recruitment to each area is based on an average F for a given area
-	| and the model is conditioned on the historical catch.  The recruitment
-	| to each area is based on:
-	| 	1) calculate wbar for a given fbar
-	| 	2) calculate equilibrium biomass from wbar
-	|	3) calculate equilibrium recruitment from Be
+	| 
+	| Simulation model is based on a stock-recruitment relationship. 
+	| Must calculate total recruitment and apportion it among regulatory 
+	| areas, such that average fishing mortality rates are achieved based
+	| based on recruitment and movement of fish into each regulatory area.
+	| 
+	|
 	|
   	*/ 
   	int i,j,iyr;
   	
   	// average F to scale log_rbar
   	dvector fbar   = ("{0.05,0.15,0.07,0.15,0.07,0.03,0.05,0.05}");	
+
+  	// Base initial abundance of halibut on the 2012 apportionment and move on.
+  	// apportionment from 2012.
+  	dvector apportionment(1,narea);
+  	apportionment = ("{0.020,0.132,0.125,0.377,0.140,0.064,0.036,0.106}");
 
   	// std for log_rbar_devs
   	double sigma_R  = 0.0;
@@ -259,22 +265,57 @@ FUNCTION void runSimulationModel(int& seed)
   	growthModel();
   	initializeModel();
 
-  	// Calculate average recruitment to each area (log_rbar)
-  	dvector   cbar(1,narea);
-  	dvector   wbar(1,narea);
-  	dvector     be(1,narea);
-  	dvector     se(1,narea);
-  	dvector     re(1,narea);
-  	cbar = colsum(obs_ct)/(nyr-syr+1);
-  	be   = elem_div(cbar , fbar);
-  	se   = exp( -value(m) - fbar );
-  	wbar = elem_div(se*value(alpha(syr)) + value(wk)*(1.0-se),(1.0-rho*se));
-  	re   = elem_prod(elem_div(be,wbar),1.0-se);
+  	
+  	dvector            ne(1,narea);
+  	dvector     	   be(1,narea);
+  	dvector            re(1,narea);
+  	dmatrix M(1,narea,1,narea);
+  	M = identity_matrix(1,narea);
+  	M = value(Pj);
+  	COUT(M)
+  	
+  	double s = exp(-value(m));
+  	be = value(bo) * apportionment;
+  	ne = be / value(wbar);   // Need to figure out equilribium soln for wbar
+  	re = value((be-s*(alpha(syr)*ne+rho*be))/wk);
+  	//ne = (value(bo) / value(wbar))/narea;
+  	// re = value((ne - exp(-m)*ne))*M;
+  	//re = ne*value(1.-exp(-m));
+  	
+  	COUT(wbar);
+  	for( i = 1; i <= 200; i++ )
+  	{
+  		ne = (s*ne)*M + re;
+  		be = s*value((alpha(syr)*ne+rho*be))*M + value(wk*re);
+		cout<<s*(alpha(syr)*ne+rho*be)*M+value(wk*re)<<endl;
+		//cout<<be<<endl;
+  	}
+  	re = ne - (s*ne)*M;
+  	COUT(sum(re));
+  	COUT(apportionment);
+  	COUT(be/sum(be));
+  	COUT(bo);
+  	COUT(sum(re));
+  	COUT(ro);
 
+  	// COUT(bo*apportionment);
+  	// exit(1);
+  	// // Calculate average recruitment to each area (log_rbar)
+  	// dvector   cbar(1,narea);
+  	// dvector   wbar(1,narea);
+  	
+  	// dvector     se(1,narea);
+  	
+  	// cbar = colsum(obs_ct)/(nyr-syr+1);
+  	// be   = elem_div(cbar , fbar);
+  	// se   = exp( -value(m) - fbar );
+  	// wbar = elem_div(se*value(alpha(syr)) + value(wk)*(1.0-se),(1.0-rho*se));
+  	// re   = elem_prod(elem_div(be,wbar),1.0-se);
+  	
   	// Add some random normal deviates to initial recruitment.
   	dvector   rtmp(1,narea);
  	rtmp.fill_randn(rng);
-  	log_rbar = log(0.8*re)+sigma_R*rtmp;
+  	log_rbar = log(re)+sigma_R*rtmp;
 
   	// Random normal deviates to log_rbar_devs
   	// Ensure each column has a mean 0. Note that trans is not overloaded for
@@ -293,6 +334,8 @@ FUNCTION void runSimulationModel(int& seed)
 	
 	// Initialize state variables
 	initialStates();
+	nt(syr) = ne;
+	bt(syr) = be;
 
   	// Population dynamics
   	dvector v_bt(1,narea);
@@ -301,13 +344,17 @@ FUNCTION void runSimulationModel(int& seed)
 	for(i=syr;i<=nyr;i++)
 	{
 		v_bt    = value(bt(i));
-		v_ct    = obs_ct(i);
+		v_ct    = 0*obs_ct(i);
 		ft(i)   = getFt(value(m),v_bt,v_ct);
 		sj      = mfexp( -m - ft(i) );
 		nt(i+1) = elem_prod( sj, nt(i) )*Pj + rt(i);
 		bt(i+1) = elem_prod( sj, value(alpha(i))*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
 	}
-	// COUT(bt(nyr));
+	COUT(rowsum(rt));
+	// COUT(elem_div(bt,nt));
+	COUT(bt);
+	COUT(bt(nyr)/sum(bt(nyr)));
+	exit(1);
 
 	// Calculate fisheries catch statisitics and fill observations
 	// with iid errors (it, and wt).
@@ -532,14 +579,14 @@ FUNCTION calcGravityModel
 FUNCTION void initializeDispersalKernel(dvector& d, const dmatrix& M)
   {
 	/*
-		|Call from PRELIMINARY_CALCS_SECTION only.
-		|
-		| This routine initializes the dispersal kernel for recruitment.
-		| Numerically compute the dispersal vector recruitment_dispersal
-		| by successive multiplication of the movement matrix (M)
-		|
-		| This method is pretty inefficient and I would not use this for
-		| dvariable calculations.  
+	|Call from PRELIMINARY_CALCS_SECTION only.
+	|
+	| This routine initializes the dispersal kernel for recruitment.
+	| Numerically compute the dispersal vector recruitment_dispersal
+	| by successive multiplication of the movement matrix (M)
+	|
+	| This method is pretty inefficient and I would not use this for
+	| dvariable calculations.  
 	*/
 	int iter;
 	int imin = d.indexmin();
