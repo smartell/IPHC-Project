@@ -281,7 +281,10 @@ FUNCTION void runSimulationModel(int& seed)
   	//ne = (value(bo) / value(wbar))/narea;
   	// re = value((ne - exp(-m)*ne))*M;
   	//re = ne*value(1.-exp(-m));
-  	
+  	COUT(N*(1-s)*P);
+  	COUT((N-s*N)*P);
+
+
   	COUT(wbar);
   	for( i = 1; i <= 200; i++ )
   	{
