@@ -223,13 +223,18 @@ PROCEDURE_SECTION
 FUNCTION void runSimulationModel(int& seed)
   {
 	/* 
-	| -------------------------------------------------------------------- |
+	|----------------------------------------------------------------------|
 	| Simulation model conditioned on the input catch data and dispersel
 	| kernel based on tagging data.  The purpose of this simulation model
 	| is to determine how estimable the model parameters are, given WPUE
 	| data only.
-	| -------------------------------------------------------------------- |
-	| 
+	|----------------------------------------------------------------------|
+	| PSUEDOCODE:
+	|  1) specify std parameters for observatoin & process errors.
+	|  2) apportion unfished biomass (bo) into each reg area. (be)
+	|  3) determine average weight of fish in each regulatory area. 
+	|  4) determine re and ne values that are consistent with apportioned bo
+	|
 	| Simulation model is based on a stock-recruitment relationship. 
 	| Must calculate total recruitment and apportion it among regulatory 
 	| areas, such that average fishing mortality rates are achieved based
@@ -248,44 +253,91 @@ FUNCTION void runSimulationModel(int& seed)
   	dvector apportionment(1,narea);
   	apportionment = ("{0.020,0.132,0.125,0.377,0.140,0.064,0.036,0.106}");
 
-  	// std for log_rbar_devs
-  	double sigma_R  = 0.0;
-
-  	// std for fishery wpue and wbar
-  	double sigma_it = 0.0;
-  	double sigma_wt = 0.0;
-
-  	// std for survey wpue
-  	double sigma_yt = 0.0;
-
+  	/*
+	|----------------------------------------------------------------------|
+	| 1) Specify STD parameters for observation and process errors.        |
+	|----------------------------------------------------------------------|
+  	*/
   	random_number_generator rng(seed);
+  	
 
-  	Pj = moveProb;
-  	// Pj = identity_matrix(1,narea);
+  	double sigma_R  = 0.0;		// std for log_rbar_devs
+  	double sigma_it = 0.0;		// std for fishery wpue 
+  	double sigma_wt = 0.0;		// std for fishery wbar
+	double sigma_yt = 0.0;		// std for survey wpue
+
+
+
+  	/*
+	|----------------------------------------------------------------------|
+	| 2) Apportion biomass into each of the regulatory areas               |
+	|----------------------------------------------------------------------|
+  	*/
   	growthModel();
   	initializeModel();
 
-  	
-  	dvector            ne(1,narea);
-  	dvector     	   be(1,narea);
-  	dvector            re(1,narea);
+  	dvector be(1,narea);
   	dmatrix M(1,narea,1,narea);
   	M = identity_matrix(1,narea);
-  	M = value(Pj);
-  	COUT(M)
+  	M = moveProb;
+  	COUT(M);
   	
-  	double s = exp(-value(m));
   	be = value(bo) * apportionment;
-  	ne = be / value(wbar);   // Need to figure out equilribium soln for wbar
-  	re = value((be-s*(alpha(syr)*ne+rho*be))/wk);
+	
+  	/*
+	|----------------------------------------------------------------------|
+	| 3) Calculate average weight of fish in each reg area.                |
+	|----------------------------------------------------------------------|
+	| Not sure if this we calculation is correct, check it numerically.
+	|
+  	*/
+  	double alfa;
+  	dvector se(1,narea);
+  	dvector we(1,narea);
+  	se    = exp(-value(m));
+  	alpha = value(alpha(syr));
+  	we    = elem_div( se*alfa*M+value(wk)*(1.-se*M), 1.-se*rho*M );
+  	// we = elem_div(se*alfa*M + value(wk)*(1.0-se)*M,(1.0-rho*se));
+  	// we = elem_div(se*alfa*M + value(wk)*(1.0-se)*M,se*M+(1.-se)-se*rho*M);
+  	COUT(we);
+  	// 35.814 73.025 36.985 75.857 38.841 34.394 38.591 36.318
+  	// 37.286 44.069 38.158 44.176 39.231 35.928 39.103 37.684
+  	// exit(1);
+
+  	/*
+	|----------------------------------------------------------------------|
+	| 4) Determine ne and re that is consistent with the apportioned bo    |
+	|----------------------------------------------------------------------|
+  	*/
+  	dvector ne(1,narea);
+  	dvector re(1,narea);
+  	ne = elem_div(be,we);
+  	// re = ne - elem_prod(se,ne)*M;
+  	re = (be - elem_prod(se,elem_div(be*alfa,we)+rho)*M)/value(wk);
+  	COUT(ne*we);
+  	COUT(re);
+  	COUT(ro);
+  	COUT(sum(re));
+  	COUT(elem_prod(se,(alfa*ne+rho*be)*M)+wk*re);
+
+  	
+  	exit(1);
+
+  	double s = exp(-value(m));
+  	//   	COUT(apportionment);
+  	// COUT(be/sum(be));
+  	// ne = be / value(wbar);   // Need to figure out equilribium soln for wbar
+  	// re = value((be-se*(alpha(syr)*ne+rho*be))/wk);
   	//ne = (value(bo) / value(wbar))/narea;
-  	// re = value((ne - exp(-m)*ne))*M;
+  	// re = (ne - elem_prod(se,ne))*M;
   	//re = ne*value(1.-exp(-m));
-  	COUT(N*(1-s)*P);
-  	COUT((N-s*N)*P);
+  	// COUT(re);
+  	// COUT(sum(re));
+  	// COUT(ne*(1-s)*M);
+  	// COUT((ne-s*ne)*M);
 
 
-  	COUT(wbar);
+  	// COUT(wbar);
   	for( i = 1; i <= 200; i++ )
   	{
   		ne = (s*ne)*M + re;
@@ -354,9 +406,12 @@ FUNCTION void runSimulationModel(int& seed)
 		bt(i+1) = elem_prod( sj, value(alpha(i))*nt(i)+rho*bt(i) )*Pj + wk*rt(i);
 	}
 	COUT(rowsum(rt));
-	// COUT(elem_div(bt,nt));
-	COUT(bt);
+	COUT(elem_div(bt,nt));
+	// COUT(bt);
+	COUT(apportionment);
 	COUT(bt(nyr)/sum(bt(nyr)));
+	COUT(bo);
+	COUT(sum(bt(nyr)));
 	exit(1);
 
 	// Calculate fisheries catch statisitics and fill observations
