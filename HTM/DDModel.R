@@ -8,7 +8,7 @@ set.seed(999)
 # |---------------------------------------------------------------------------|
 # | Model parameters
 # |---------------------------------------------------------------------------|
-A       <- 8    				#Number of areas
+A       <- 4    				#Number of areas
 agek    <- 6
 bo      <- 100
 reck    <- 12
@@ -22,11 +22,11 @@ wk      <- alpha * (1-rho^agek)/(1-rho)
 # |----------------------------------------------------------------------------|
 # | Movement matrix based on gravity model
 # |----------------------------------------------------------------------------|
-R       <- 2.5
+R       <- 5.5
 g       <- rnorm(A,0,1.0)
 P       <- matrix(exp(g),nrow=A,ncol=A,byrow=FALSE)
 diag(P) <- diag(P) + exp(R)
-P       <- P/colSums(P)
+P       <- P/rowSums(P)
 # P       <- diag(1,A)
 
 
@@ -34,19 +34,28 @@ P       <- P/colSums(P)
 # |----------------------------------------------------------------------------|
 # | Equilibrium conditions.
 # |----------------------------------------------------------------------------|
-apportion <- runif(A,1.0,1.0)
+apportion <- runif(A,0.0,1.0)
 apportion <- apportion/sum(apportion)
 wbar      <- (s*alpha+ wk*(1-s)) / (1-rho*s)
 ro        <- bo/wbar*(1-s)
-be        <- bo * apportion 
+be        <- bo * apportion
+re        <- ro * apportion 
 se        <- rep(s,A)
 we        <- ((se*alpha)%*%P + wk*(1-se%*%P))/(1-(se*rho)%*%P)
-# we        <- -(se%*%P*alpha - wk*se%*%P + wk)/(-1 + se%*%P*rho)
+we        <- -(se%*%P*alpha - wk*(se%*%P) + wk)/(-1 + (se%*%P)*rho)
+be        <- wk*re/(1.-se%*%P*(alpha/we+rho))
+be        <- -wk*re*we/(alpha*se%*%P+rho*we*se%*%P-we)
 ne        <- be / we
+print(ne)
+# re        <- (be - se*be*(alpha/we+rho)%*%P)/wk
 
 # ne        <- (be*(-1+se)%*%P)/(we*(se%*%P-1))
-
-pe        <- ((ne - se*ne%*%P)*wbar)/(bo*(1.-s))
+# The following is the same as ne=be/we
+ne        <- ((be-wk*re)%*%solve(P)/se - rho*be)/alpha
+print(ne)
+# Constraint in that ne >= se*ne%*%P
+# pe        <- ((ne - se*ne%*%P)*wbar)/(bo*(1.-s))
+pe        <- re/sum(re)
 so        <- reck * (ro/bo)
 beta      <- (reck-1.0)/bo
 
@@ -73,7 +82,7 @@ for(i in 1:T)
 		rt[i,] = pe*(so*st/(1.+beta*st))
 	}
 
-	bt[i+1,] <- s*(alpha*nt[i,]+rho*bt[i,])%*%P + wk*rt[i,]
-	nt[i+1,] <- s*nt[i,]%*%P + rt[i,]
+	bt[i+1,] <- (se%*%P)*(alpha*nt[i,]+rho*bt[i,]) + wk*rt[i,]
+	nt[i+1,] <- (se%*%P)*nt[i,] + rt[i,]
 	wt[i+1,] <- bt[i+1,]/nt[i+1,]
 }
