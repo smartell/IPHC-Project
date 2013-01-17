@@ -25,10 +25,11 @@ wk      <- alpha * (1-rho^agek)/(1-rho)
 # |----------------------------------------------------------------------------|
 R       <- 4.5
 g       <- rnorm(A,0,1.0)
-P       <- matrix(exp(g),nrow=A,ncol=A,byrow=FALSE)
-diag(P) <- diag(P) + exp(R)
-P       <- t(P)/rowSums(P)
-# P       <- diag(1,A)
+P       <- matrix(g,nrow=A,ncol=A,byrow=TRUE)
+diag(P) <- diag(P) + R
+P       <- exp(P)
+P       <- (P)/rowSums(P)
+#        P       <- diag(1,A)
 
 
 
@@ -66,11 +67,13 @@ equil <- function(ue)
 	we <- -(se*alpha - wk*(se) + wk)/(-1 + (se)*rho)
 	be <- -(-we+se*alpha+se*rho*we+wk*aj*we)/(bj*(-we+se*alpha+se*rho*we))
 	re <- aj*be/(1.0+bj*be)
+	print(re)
 	for(i in 1:100)
 	{
 		re <- pe * (so*sum(be)/(1+beta*sum(be)))
 		be <- se * be *(alpha/we+rho)+ wk*re 
 	}
+	print(re)
 	ne <- be / we
 	ye <- ue * be
 	return(ye)
@@ -78,14 +81,14 @@ equil <- function(ue)
 
 YE <- function(log.ue)
 {
-	ue <- exp(log.ue)
+	ue <- exp(log.ue) 	
 	ye<- equil(ue)
 	return(sum(ye))
 }
 
 
 # |----------------------------------------------------------------------------|
-# | Dynamic calculations
+# | Dynamic calculations													
 # |----------------------------------------------------------------------------|
 T  <- 100
 bt = nt = rt = wt = matrix(NA,nrow=T+1,ncol=A)
